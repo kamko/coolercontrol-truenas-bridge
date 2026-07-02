@@ -1,0 +1,36 @@
+[package]
+name = "coolercontrol-truenas-bridge"
+version = "0.1.0"
+authors = ["kamko"]
+description = "CoolerControl device plugin exposing TrueNAS disk temperatures"
+license = "MIT"
+repository = "https://github.com/kamko/coolercontrol-truenas-bridge"
+rust-version = "1.88.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.54", features = ["derive"] }
+env_logger = "0.11.8"
+futures-util = "0.3.31"
+log = "0.4.29"
+native-tls = "0.2.14"
+prost = "0.14.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.49.0", features = ["fs", "macros", "net", "rt", "signal", "time"] }
+tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
+tokio-util = "0.7.18"
+tonic = "0.14.2"
+tonic-health = "0.14.2"
+tonic-prost = "0.14.2"
+
+[build-dependencies]
+protoc-bin-vendored = "3.2.0"
+tonic-prost-build = "0.14.2"
+
+[profile.release]
+strip = "symbols"
+opt-level = 3
+lto = "fat"
+codegen-units = 1

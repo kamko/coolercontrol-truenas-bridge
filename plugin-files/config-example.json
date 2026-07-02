@@ -3,14 +3,10 @@
     "host": "truenas.local",
     "username": "coolercontrol",
     "api_key": "replace-me",
+    "api_key_file": "",
     "tls": true,
     "tls_verify": false,
     "disk_names": []
-  },
-  "export": {
-    "directory": "/var/lib/truenas-coolercontrol-sensors",
-    "write_per_disk": true,
-    "write_status_json": true
   },
   "polling": {
     "poll_interval_seconds": 300,

@@ -1,13 +1,12 @@
-BINARY := truenas-coolercontrol-sensors
-PACKAGE := ./cmd/truenas-coolercontrol-sensors
+BINARY := coolercontrol-truenas-bridge
 
 .PHONY: build test clean
 
 build:
-	go build -trimpath -ldflags="-s -w" -o bin/$(BINARY) $(PACKAGE)
+	cargo build --release
 
 test:
-	go test ./...
+	cargo test
 
 clean:
-	rm -rf bin
+	cargo clean

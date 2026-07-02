@@ -8,5 +8,7 @@ __pycache__/
 dist/
 build/
 bin/
+target/
+.envrc
 .env
 *.log
