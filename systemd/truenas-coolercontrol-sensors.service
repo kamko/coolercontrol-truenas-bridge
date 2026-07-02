@@ -1,0 +1,20 @@
+[Unit]
+Description=TrueNAS disk temperatures for CoolerControl
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/truenas-coolercontrol-sensors --config /etc/truenas-coolercontrol-sensors.json
+Restart=always
+RestartSec=30
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/truenas-coolercontrol-sensors
+
+[Install]
+WantedBy=multi-user.target
