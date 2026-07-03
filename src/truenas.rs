@@ -1,6 +1,7 @@
 use crate::config::TrueNasConfig;
 use anyhow::{Context, Result, anyhow, bail};
 use futures_util::{SinkExt, StreamExt};
+use log::debug;
 use native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -15,6 +16,12 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskReading {
+    pub temperature_c: f64,
+    pub label: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct TrueNasClient {
@@ -48,7 +55,7 @@ impl TrueNasClient {
         Self { config, timeout }
     }
 
-    pub async fn disk_temperatures(&self) -> Result<BTreeMap<String, f64>> {
+    pub async fn disk_temperatures(&self) -> Result<BTreeMap<String, DiskReading>> {
         let mut socket = self.connect().await?;
         let mut next_id = 1;
 
@@ -73,7 +80,30 @@ impl TrueNasClient {
             bail!("TrueNAS returned no usable disk temperatures");
         }
 
-        Ok(temperatures)
+        let labels = match self.disk_labels(&mut socket, &mut next_id).await {
+            Ok(labels) => labels,
+            Err(err) => {
+                debug!("failed to fetch TrueNAS disk labels: {err:#}");
+                BTreeMap::new()
+            }
+        };
+
+        Ok(temperatures
+            .into_iter()
+            .map(|(disk_name, temperature_c)| {
+                let label = labels
+                    .get(&disk_name)
+                    .cloned()
+                    .unwrap_or_else(|| disk_name.clone());
+                (
+                    disk_name,
+                    DiskReading {
+                        temperature_c,
+                        label,
+                    },
+                )
+            })
+            .collect())
     }
 
     async fn connect(&self) -> Result<Socket> {
@@ -243,6 +273,28 @@ impl TrueNasClient {
         }
     }
 
+    async fn disk_labels(
+        &self,
+        socket: &mut Socket,
+        next_id: &mut u64,
+    ) -> Result<BTreeMap<String, String>> {
+        let rows = self
+            .api_call(socket, next_id, "disk.query", json!([[], {}]))
+            .await?;
+        let rows = rows
+            .as_array()
+            .ok_or_else(|| anyhow!("disk.query returned non-array result"))?;
+
+        let mut labels = BTreeMap::new();
+        for row in rows {
+            let Some(name) = row.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            labels.insert(name.to_string(), disk_label(row, name));
+        }
+        Ok(labels)
+    }
+
     async fn legacy_handshake(&self, socket: &mut Socket) -> Result<()> {
         let payload = json!({
             "msg": "connect",
@@ -368,6 +420,40 @@ fn describe_connect_error(url: &str, err: WsError) -> String {
     }
 }
 
+fn disk_label(row: &Value, name: &str) -> String {
+    let description = row.get("description").and_then(non_empty_string);
+    let model = row.get("model").and_then(non_empty_string);
+    let serial = row.get("serial").and_then(non_empty_string);
+
+    let mut parts = vec![name.to_string()];
+    if let Some(description) = description {
+        parts.push(description.to_string());
+    } else if let Some(model) = model {
+        parts.push(model.to_string());
+    }
+    if let Some(serial) = serial {
+        parts.push(format!("SN {}", compact_serial(serial)));
+    }
+
+    parts.join(" - ")
+}
+
+fn non_empty_string(value: &Value) -> Option<&str> {
+    let text = value.as_str()?.trim();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn compact_serial(serial: &str) -> String {
+    const SERIAL_TAIL_LENGTH: usize = 8;
+    let serial = serial.trim();
+    let chars = serial.chars().collect::<Vec<_>>();
+    if chars.len() <= SERIAL_TAIL_LENGTH {
+        serial.to_string()
+    } else {
+        chars[chars.len() - SERIAL_TAIL_LENGTH..].iter().collect()
+    }
+}
+
 fn url_with_default_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -> String {
     if host_or_path.contains('/') {
         format!("{scheme}://{host_or_path}")
@@ -378,8 +464,9 @@ fn url_with_default_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -
 
 #[cfg(test)]
 mod tests {
-    use super::TrueNasClient;
+    use super::{TrueNasClient, compact_serial, disk_label};
     use crate::config::TrueNasConfig;
+    use serde_json::json;
     use std::time::Duration;
 
     fn config(host: &str) -> TrueNasConfig {
@@ -414,6 +501,38 @@ mod tests {
             Duration::from_secs(1),
         );
         assert_eq!(client.websocket_url(), "wss://truenas.local/websocket");
+    }
+
+    #[test]
+    fn builds_readable_disk_label() {
+        let row = json!({
+            "name": "sda",
+            "model": "HUH721212AL4200",
+            "serial": "ABCDEFGH12345678"
+        });
+
+        assert_eq!(
+            disk_label(&row, "sda"),
+            "sda - HUH721212AL4200 - SN 12345678"
+        );
+    }
+
+    #[test]
+    fn description_takes_precedence_in_disk_label() {
+        let row = json!({
+            "name": "sda",
+            "description": "front bay 1",
+            "model": "HUH721212AL4200",
+            "serial": "1234"
+        });
+
+        assert_eq!(disk_label(&row, "sda"), "sda - front bay 1 - SN 1234");
+    }
+
+    #[test]
+    fn compacts_long_serials() {
+        assert_eq!(compact_serial("ABCDEFGH12345678"), "12345678");
+        assert_eq!(compact_serial("1234"), "1234");
     }
 }
 

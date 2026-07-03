@@ -10,7 +10,7 @@ use crate::device_service::v1::{
 };
 use crate::models::v1::status::Metric;
 use crate::models::v1::{Device, DeviceInfo, DriverInfo, Status, TempInfo};
-use crate::truenas::TrueNasClient;
+use crate::truenas::{DiskReading, TrueNasClient};
 use log::warn;
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
@@ -22,7 +22,7 @@ const DEVICE_ID: &str = "truenas";
 
 #[derive(Debug)]
 struct TempCache {
-    temperatures: BTreeMap<String, f64>,
+    readings: BTreeMap<String, DiskReading>,
     last_success: Option<Instant>,
     last_attempt: Option<Instant>,
     last_error: Option<String>,
@@ -43,14 +43,22 @@ impl TrueNasDeviceService {
             .disk_names
             .iter()
             .cloned()
-            .map(|disk| (disk, config.polling.failsafe_temperature_c))
+            .map(|disk| {
+                (
+                    disk.clone(),
+                    DiskReading {
+                        temperature_c: config.polling.failsafe_temperature_c,
+                        label: disk,
+                    },
+                )
+            })
             .collect();
 
         Self {
             config,
             client,
             cache: Mutex::new(TempCache {
-                temperatures: configured_disks,
+                readings: configured_disks,
                 last_success: None,
                 last_attempt: None,
                 last_error: None,
@@ -75,7 +83,7 @@ impl TrueNasDeviceService {
         match self.client.disk_temperatures().await {
             Ok(temperatures) => {
                 let mut cache = self.cache.lock().await;
-                cache.temperatures = temperatures;
+                cache.readings = temperatures;
                 cache.last_attempt = Some(Instant::now());
                 cache.last_success = Some(Instant::now());
                 cache.last_error = None;
@@ -90,14 +98,17 @@ impl TrueNasDeviceService {
                     .map(|last| last.elapsed() > self.config.polling.stale_after())
                     .unwrap_or(true)
                 {
-                    if cache.temperatures.is_empty() {
-                        cache.temperatures.insert(
+                    if cache.readings.is_empty() {
+                        cache.readings.insert(
                             "failsafe".to_string(),
-                            self.config.polling.failsafe_temperature_c,
+                            DiskReading {
+                                temperature_c: self.config.polling.failsafe_temperature_c,
+                                label: "failsafe".to_string(),
+                            },
                         );
                     } else {
-                        for value in cache.temperatures.values_mut() {
-                            *value = self.config.polling.failsafe_temperature_c;
+                        for reading in cache.readings.values_mut() {
+                            reading.temperature_c = self.config.polling.failsafe_temperature_c;
                         }
                     }
                 }
@@ -110,14 +121,14 @@ impl TrueNasDeviceService {
         let cache = self.cache.lock().await;
 
         let temps = cache
-            .temperatures
-            .keys()
+            .readings
+            .iter()
             .enumerate()
-            .map(|(index, disk)| {
+            .map(|(index, (disk, reading))| {
                 (
                     temp_id(disk),
                     TempInfo {
-                        label: disk.to_string(),
+                        label: reading.label.clone(),
                         number: (index + 1) as u32,
                     },
                 )
@@ -203,11 +214,11 @@ impl DeviceService for TrueNasDeviceService {
         self.refresh_if_needed().await;
         let cache = self.cache.lock().await;
         let status = cache
-            .temperatures
+            .readings
             .iter()
-            .map(|(disk, temp)| Status {
+            .map(|(disk, reading)| Status {
                 id: temp_id(disk),
-                metric: Some(Metric::Temp(*temp)),
+                metric: Some(Metric::Temp(reading.temperature_c)),
             })
             .collect();
 
