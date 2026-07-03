@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::codegen::tokio_stream::wrappers::UnixListenerStream;
 #[cfg(unix)]
 use tonic::transport::Server;
+use truenas::TrueNasClient;
 
 #[cfg(unix)]
 use crate::device_service::v1::device_service_server::DeviceServiceServer;
@@ -53,6 +54,9 @@ struct Args {
 
     #[arg(long, default_value = "/tmp/coolercontrol-truenas-bridge.sock")]
     socket: String,
+
+    #[arg(long)]
+    check: bool,
 }
 
 #[cfg(unix)]
@@ -63,6 +67,13 @@ async fn main() -> Result<()> {
 
     info!("starting {SERVICE_ID} v{VERSION}");
     let config = load_config(args.config.as_deref())?;
+    if args.check {
+        let client = TrueNasClient::new(config.truenas.clone(), config.polling.connect_timeout());
+        let temperatures = client.disk_temperatures().await?;
+        println!("{}", serde_json::to_string_pretty(&temperatures)?);
+        return Ok(());
+    }
+
     let service = TrueNasDeviceService::new(config);
     let run_token = setup_termination_signals();
 

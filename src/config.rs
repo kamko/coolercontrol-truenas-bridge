@@ -17,6 +17,8 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrueNasConfig {
     pub host: String,
+    #[serde(default = "default_endpoint")]
+    pub endpoint: String,
     #[serde(default)]
     pub username: String,
     #[serde(default)]
@@ -84,6 +86,9 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config> {
     if config.truenas.host.is_empty() {
         bail!("truenas.host is required");
     }
+    if config.truenas.endpoint.is_empty() || !config.truenas.endpoint.starts_with('/') {
+        bail!("truenas.endpoint must start with /");
+    }
     if config.truenas.api_key.is_empty() {
         bail!("truenas.api_key or truenas.api_key_file is required");
     }
@@ -96,6 +101,10 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config> {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_endpoint() -> String {
+    "/api/current".to_string()
 }
 
 fn default_poll_interval_seconds() -> u64 {

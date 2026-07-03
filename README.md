@@ -77,6 +77,7 @@ Example:
 {
   "truenas": {
     "host": "truenas.local",
+    "endpoint": "/api/current",
     "username": "coolercontrol",
     "api_key": "",
     "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
@@ -94,6 +95,16 @@ Example:
 ```
 
 `disk_names` can stay empty to expose all disks returned by TrueNAS. Set it to a list like `["sda", "sdb"]` to limit the API call.
+
+`host` can be a bare host such as `truenas.local`, `truenas.local:443`, or a full URL such as `https://truenas.local`. `endpoint` defaults to `/api/current`; older TrueNAS installs may need `/websocket`.
+
+Test the configured TrueNAS connection manually:
+
+```bash
+sudo /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-truenas-bridge \
+  --config /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json \
+  --check
+```
 
 TrueNAS updates disk temperatures roughly every 5 minutes, so `poll_interval_seconds = 300` is the normal default.
 

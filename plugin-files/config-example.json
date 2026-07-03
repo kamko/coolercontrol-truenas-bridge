@@ -1,6 +1,7 @@
 {
   "truenas": {
     "host": "truenas.local",
+    "endpoint": "/api/current",
     "username": "coolercontrol",
     "api_key": "replace-me",
     "api_key_file": "",

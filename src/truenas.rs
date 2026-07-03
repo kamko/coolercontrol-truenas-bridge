@@ -82,8 +82,7 @@ impl TrueNasClient {
     }
 
     async fn connect(&self) -> Result<Socket> {
-        let scheme = if self.config.tls { "wss" } else { "ws" };
-        let url = format!("{scheme}://{}/api/current", self.config.host);
+        let url = self.websocket_url();
         let connector = if self.config.tls && !self.config.tls_verify {
             let tls = TlsConnector::builder()
                 .danger_accept_invalid_certs(true)
@@ -96,13 +95,30 @@ impl TrueNasClient {
 
         let (socket, _) = timeout(
             self.timeout,
-            connect_async_tls_with_config(url, None, false, connector),
+            connect_async_tls_with_config(url.as_str(), None, false, connector),
         )
         .await
         .context("connect TrueNAS WebSocket timed out")?
-        .context("connect TrueNAS WebSocket")?;
+        .with_context(|| format!("connect TrueNAS WebSocket: {url}"))?;
 
         Ok(socket)
+    }
+
+    fn websocket_url(&self) -> String {
+        let host = self.config.host.trim_end_matches('/');
+        if host.starts_with("ws://") || host.starts_with("wss://") {
+            return host.to_string();
+        }
+
+        if let Some(rest) = host.strip_prefix("https://") {
+            return url_with_default_endpoint("wss", rest, &self.config.endpoint);
+        }
+        if let Some(rest) = host.strip_prefix("http://") {
+            return url_with_default_endpoint("ws", rest, &self.config.endpoint);
+        }
+
+        let scheme = if self.config.tls { "wss" } else { "ws" };
+        url_with_default_endpoint(scheme, host, &self.config.endpoint)
     }
 
     async fn login(&self, socket: &mut Socket, next_id: &mut u64) -> Result<()> {
@@ -193,6 +209,55 @@ impl TrueNasClient {
                 .result
                 .ok_or_else(|| anyhow!("{method} response had no result"));
         }
+    }
+}
+
+fn url_with_default_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -> String {
+    if host_or_path.contains('/') {
+        format!("{scheme}://{host_or_path}")
+    } else {
+        format!("{scheme}://{host_or_path}{endpoint}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrueNasClient;
+    use crate::config::TrueNasConfig;
+    use std::time::Duration;
+
+    fn config(host: &str) -> TrueNasConfig {
+        TrueNasConfig {
+            host: host.to_string(),
+            endpoint: "/api/current".to_string(),
+            username: "coolercontrol".to_string(),
+            api_key: "key".to_string(),
+            api_key_file: String::new(),
+            tls: true,
+            tls_verify: false,
+            disk_names: vec![],
+        }
+    }
+
+    #[test]
+    fn builds_websocket_url_from_bare_host() {
+        let client = TrueNasClient::new(config("truenas.local"), Duration::from_secs(1));
+        assert_eq!(client.websocket_url(), "wss://truenas.local/api/current");
+    }
+
+    #[test]
+    fn accepts_https_host() {
+        let client = TrueNasClient::new(config("https://truenas.local"), Duration::from_secs(1));
+        assert_eq!(client.websocket_url(), "wss://truenas.local/api/current");
+    }
+
+    #[test]
+    fn preserves_full_websocket_url() {
+        let client = TrueNasClient::new(
+            config("wss://truenas.local/websocket"),
+            Duration::from_secs(1),
+        );
+        assert_eq!(client.websocket_url(), "wss://truenas.local/websocket");
     }
 }
 

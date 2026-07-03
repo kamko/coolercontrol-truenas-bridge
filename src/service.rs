@@ -81,7 +81,7 @@ impl TrueNasDeviceService {
                 cache.last_error = None;
             }
             Err(err) => {
-                warn!("failed to fetch TrueNAS disk temperatures: {err}");
+                warn!("failed to fetch TrueNAS disk temperatures: {err:?}");
                 let mut cache = self.cache.lock().await;
                 cache.last_attempt = Some(Instant::now());
                 cache.last_error = Some(err.to_string());
