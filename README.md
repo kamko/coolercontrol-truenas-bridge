@@ -31,16 +31,16 @@ Download the `.deb` artifact from the latest successful GitHub Actions run or fr
 
 ```bash
 sudo apt install ./coolercontrol-truenas-bridge_*_amd64.deb
-sudoedit /etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
 
 The package installs:
 
 ```text
-/usr/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-truenas-bridge
-/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/manifest.toml
-/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-truenas-bridge
+/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/manifest.toml
+/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 ```
 
 It creates `config.json` only if it does not already exist.
@@ -55,7 +55,7 @@ git clone https://github.com/kamko/coolercontrol-truenas-bridge.git
 cd coolercontrol-truenas-bridge
 
 sudo ./scripts/install-plugin.sh
-sudoedit /etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
 
@@ -68,7 +68,7 @@ The plugin manifest runs the service as privileged so the config/API key can sta
 Config path:
 
 ```text
-/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 ```
 
 Example:
@@ -79,7 +79,7 @@ Example:
     "host": "truenas.local",
     "username": "coolercontrol",
     "api_key": "",
-    "api_key_file": "/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
+    "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
     "tls": true,
     "tls_verify": false,
     "disk_names": []

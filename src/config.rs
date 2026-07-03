@@ -5,7 +5,7 @@ use std::time::Duration;
 
 pub const SERVICE_ID: &str = env!("CARGO_PKG_NAME");
 const DEFAULT_CONFIG_PATH: &str =
-    "/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json";
+    "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {

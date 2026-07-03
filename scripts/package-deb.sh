@@ -10,8 +10,7 @@ architecture="${1:-$(dpkg --print-architecture)}"
 dist_dir="${repo_dir}/dist"
 work_dir="${dist_dir}/deb-root"
 plugin_id="coolercontrol-truenas-bridge"
-plugin_lib_dir="/usr/lib/coolercontrol/plugins/${plugin_id}"
-plugin_config_dir="/etc/coolercontrol/plugins/${plugin_id}"
+plugin_dir="/var/lib/coolercontrol/plugins/${plugin_id}"
 share_dir="/usr/share/${package_name}"
 
 binary_path="${repo_dir}/target/release/${package_name}"
@@ -24,17 +23,12 @@ fi
 rm -rf "${work_dir}"
 install -d \
   "${work_dir}/DEBIAN" \
-  "${work_dir}${plugin_lib_dir}" \
-  "${work_dir}${plugin_config_dir}" \
+  "${work_dir}${plugin_dir}" \
   "${work_dir}${share_dir}"
 
-install -m 0755 "${binary_path}" "${work_dir}${plugin_lib_dir}/${package_name}"
+install -m 0755 "${binary_path}" "${work_dir}${plugin_dir}/${package_name}"
 install -m 0644 plugin-files/config-example.json "${work_dir}${share_dir}/config-example.json"
-
-sed \
-  -e "s|^executable = .*|executable = \"${plugin_lib_dir}/${package_name}\"|" \
-  plugin-files/manifest.toml > "${work_dir}${plugin_config_dir}/manifest.toml"
-chmod 0644 "${work_dir}${plugin_config_dir}/manifest.toml"
+install -m 0644 plugin-files/manifest.toml "${work_dir}${plugin_dir}/manifest.toml"
 
 installed_size="$(du -ks "${work_dir}" | cut -f1)"
 cat > "${work_dir}/DEBIAN/control" <<CONTROL
@@ -45,7 +39,7 @@ Priority: optional
 Architecture: ${architecture}
 Maintainer: kamko
 Installed-Size: ${installed_size}
-Depends: coolercontrol
+Depends: coolercontrold | coolercontrol
 Description: CoolerControl plugin exposing TrueNAS disk temperatures
  Exposes TrueNAS disk temperatures as CoolerControl temperature sources
  for HBA passthrough setups where TrueNAS sees disks and Proxmox controls fans.
@@ -55,7 +49,7 @@ cat > "${work_dir}/DEBIAN/postinst" <<'POSTINST'
 #!/bin/sh
 set -e
 
-plugin_dir="/etc/coolercontrol/plugins/coolercontrol-truenas-bridge"
+plugin_dir="/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge"
 config_path="${plugin_dir}/config.json"
 example_path="/usr/share/coolercontrol-truenas-bridge/config-example.json"
 
@@ -69,7 +63,7 @@ cat <<'MESSAGE'
 coolercontrol-truenas-bridge installed.
 
 Next:
-  sudoedit /etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+  sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
   sudo systemctl restart coolercontrold
 
 MESSAGE

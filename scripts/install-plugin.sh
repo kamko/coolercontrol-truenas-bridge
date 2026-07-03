@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-plugin_dir="/etc/coolercontrol/plugins/coolercontrol-truenas-bridge"
+plugin_dir="/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge"
 binary_path="${plugin_dir}/coolercontrol-truenas-bridge"
 config_path="${plugin_dir}/config.json"
 
