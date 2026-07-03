@@ -33,8 +33,8 @@ Download the `.deb` package from the latest release, then install it on the Prox
 
 ```bash
 cd /tmp
-wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.3/coolercontrol-truenas-bridge_0.1.3_amd64.deb
-sudo apt install ./coolercontrol-truenas-bridge_0.1.3_amd64.deb
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.4/coolercontrol-truenas-bridge_0.1.4_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.4_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
