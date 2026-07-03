@@ -122,30 +122,6 @@ impl TrueNasClient {
     }
 
     async fn login(&self, socket: &mut Socket, next_id: &mut u64) -> Result<()> {
-        if !self.config.username.is_empty() {
-            let result = self
-                .call(
-                    socket,
-                    next_id,
-                    "auth.login_ex",
-                    json!([{
-                        "mechanism": "API_KEY_PLAIN",
-                        "username": self.config.username,
-                        "api_key": self.config.api_key,
-                        "login_options": {
-                            "user_info": false,
-                            "reconnect_token": false
-                        }
-                    }]),
-                )
-                .await?;
-
-            if result.get("response_type").and_then(Value::as_str) != Some("SUCCESS") {
-                bail!("TrueNAS auth.login_ex failed: {result}");
-            }
-            return Ok(());
-        }
-
         let result = self
             .call(
                 socket,

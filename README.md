@@ -23,7 +23,7 @@ Required role:
 REPORTING_READ
 ```
 
-TrueNAS 25.04 and newer use the WebSocket API. This plugin uses `auth.login_ex` with `API_KEY_PLAIN`.
+TrueNAS 25.04 and newer use the WebSocket API. This plugin uses `auth.login_with_api_key`.
 
 ## Install From Package
 
@@ -78,7 +78,7 @@ Example:
   "truenas": {
     "host": "truenas.local",
     "endpoint": "/api/current",
-    "username": "coolercontrol",
+    "username": "",
     "api_key": "",
     "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
     "tls": true,

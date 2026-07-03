@@ -1,6 +1,6 @@
 [package]
 name = "coolercontrol-truenas-bridge"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["kamko"]
 description = "CoolerControl device plugin exposing TrueNAS disk temperatures"
 license = "MIT"
