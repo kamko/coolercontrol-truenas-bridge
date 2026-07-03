@@ -25,6 +25,26 @@ REPORTING_READ
 
 TrueNAS 25.04 and newer use the WebSocket API. This plugin uses `auth.login_ex` with `API_KEY_PLAIN`.
 
+## Install From Package
+
+Download the `.deb` artifact from the latest successful GitHub Actions run or from a tagged release, then install it on the Proxmox/CoolerControl host:
+
+```bash
+sudo apt install ./coolercontrol-truenas-bridge_*_amd64.deb
+sudoedit /etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+sudo systemctl restart coolercontrold
+```
+
+The package installs:
+
+```text
+/usr/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-truenas-bridge
+/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/manifest.toml
+/etc/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+```
+
+It creates `config.json` only if it does not already exist.
+
 ## Install From Source
 
 ```bash
@@ -85,3 +105,10 @@ cargo build --release
 ```
 
 GitHub Actions builds a Linux `amd64` artifact.
+
+Build the Debian package locally:
+
+```bash
+cargo build --release
+bash scripts/package-deb.sh amd64
+```

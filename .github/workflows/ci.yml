@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev dpkg-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
@@ -35,10 +35,13 @@ jobs:
           cp plugin-files/manifest.toml dist/coolercontrol-truenas-bridge-linux-amd64/
           cp plugin-files/config-example.json dist/coolercontrol-truenas-bridge-linux-amd64/
           tar -C dist -czf dist/coolercontrol-truenas-bridge-linux-amd64.tar.gz coolercontrol-truenas-bridge-linux-amd64
+          bash scripts/package-deb.sh amd64
       - uses: actions/upload-artifact@v4
         with:
           name: coolercontrol-truenas-bridge-linux-amd64
-          path: dist/coolercontrol-truenas-bridge-linux-amd64.tar.gz
+          path: |
+            dist/coolercontrol-truenas-bridge-linux-amd64.tar.gz
+            dist/*.deb
 
   release:
     runs-on: ubuntu-latest
