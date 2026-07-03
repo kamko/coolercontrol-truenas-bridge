@@ -55,7 +55,7 @@ impl TrueNasClient {
         self.login(&mut socket, &mut next_id).await?;
 
         let result = self
-            .call(
+            .api_call(
                 &mut socket,
                 &mut next_id,
                 "disk.temperatures",
@@ -123,8 +123,9 @@ impl TrueNasClient {
 
     async fn login(&self, socket: &mut Socket, next_id: &mut u64) -> Result<()> {
         if self.config.endpoint == "/websocket" {
+            self.legacy_handshake(socket).await?;
             let result = self
-                .call(
+                .legacy_call(
                     socket,
                     next_id,
                     "auth.login_with_api_key",
@@ -189,20 +190,8 @@ impl TrueNasClient {
                 .ok_or_else(|| anyhow!("TrueNAS WebSocket closed while waiting for {method}"))?
                 .with_context(|| format!("read {method} response"))?;
 
-            let text = match message {
-                Message::Text(text) => text,
-                Message::Binary(bytes) => String::from_utf8(bytes.to_vec())
-                    .with_context(|| format!("decode binary {method} response"))?
-                    .into(),
-                Message::Close(Some(frame)) => bail!(
-                    "TrueNAS WebSocket closed while waiting for {method}: {} {}",
-                    frame.code,
-                    frame.reason
-                ),
-                Message::Close(None) => {
-                    bail!("TrueNAS WebSocket closed while waiting for {method}")
-                }
-                _ => continue,
+            let Some(text) = message_to_text(message, method)? else {
+                continue;
             };
             let response: RpcResponse =
                 serde_json::from_str(&text).with_context(|| format!("decode {method} response"))?;
@@ -217,6 +206,122 @@ impl TrueNasClient {
                 .result
                 .ok_or_else(|| anyhow!("{method} response had no result"));
         }
+    }
+
+    async fn api_call(
+        &self,
+        socket: &mut Socket,
+        next_id: &mut u64,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        if self.config.endpoint == "/websocket" {
+            self.legacy_call(socket, next_id, method, params).await
+        } else {
+            self.call(socket, next_id, method, params).await
+        }
+    }
+
+    async fn legacy_handshake(&self, socket: &mut Socket) -> Result<()> {
+        let payload = json!({
+            "msg": "connect",
+            "version": "1",
+            "support": ["1"]
+        });
+        timeout(
+            self.timeout,
+            socket.send(Message::Text(payload.to_string().into())),
+        )
+        .await
+        .context("send legacy connect timed out")?
+        .context("send legacy connect")?;
+
+        loop {
+            let message = timeout(self.timeout, socket.next())
+                .await
+                .context("read legacy connect response timed out")?
+                .ok_or_else(|| anyhow!("TrueNAS WebSocket closed during legacy connect"))?
+                .context("read legacy connect response")?;
+
+            let Some(text) = message_to_text(message, "legacy connect")? else {
+                continue;
+            };
+            let response: Value =
+                serde_json::from_str(&text).context("decode legacy connect response")?;
+            match response.get("msg").and_then(Value::as_str) {
+                Some("connected") => return Ok(()),
+                Some("failed") => bail!("TrueNAS legacy WebSocket rejected protocol: {response}"),
+                _ => continue,
+            }
+        }
+    }
+
+    async fn legacy_call(
+        &self,
+        socket: &mut Socket,
+        next_id: &mut u64,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        let request_id = next_id.to_string();
+        *next_id += 1;
+
+        let payload = json!({
+            "msg": "method",
+            "method": method,
+            "id": request_id,
+            "params": params
+        });
+        timeout(
+            self.timeout,
+            socket.send(Message::Text(payload.to_string().into())),
+        )
+        .await
+        .with_context(|| format!("send {method} timed out"))?
+        .with_context(|| format!("send {method}"))?;
+
+        loop {
+            let message = timeout(self.timeout, socket.next())
+                .await
+                .with_context(|| format!("read {method} response timed out"))?
+                .ok_or_else(|| anyhow!("TrueNAS WebSocket closed while waiting for {method}"))?
+                .with_context(|| format!("read {method} response"))?;
+
+            let Some(text) = message_to_text(message, method)? else {
+                continue;
+            };
+            let response: Value =
+                serde_json::from_str(&text).with_context(|| format!("decode {method} response"))?;
+            if response.get("id").and_then(Value::as_str) != Some(request_id.as_str()) {
+                continue;
+            }
+            if response.get("msg").and_then(Value::as_str) != Some("result") {
+                continue;
+            }
+            if let Some(error) = response.get("error") {
+                bail!("{method} failed: {error}");
+            }
+            return response
+                .get("result")
+                .cloned()
+                .ok_or_else(|| anyhow!("{method} response had no result"));
+        }
+    }
+}
+
+fn message_to_text(message: Message, method: &str) -> Result<Option<String>> {
+    match message {
+        Message::Text(text) => Ok(Some(text.to_string())),
+        Message::Binary(bytes) => String::from_utf8(bytes.to_vec())
+            .with_context(|| format!("decode binary {method} response"))
+            .map(Some),
+        Message::Close(Some(frame)) => bail!(
+            "TrueNAS WebSocket closed while waiting for {method}: {} {}",
+            frame.code,
+            frame.reason
+        ),
+        Message::Close(None) => bail!("TrueNAS WebSocket closed while waiting for {method}"),
+        _ => Ok(None),
     }
 }
 
