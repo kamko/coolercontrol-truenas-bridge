@@ -33,8 +33,8 @@ Download the `.deb` package from the latest release, then install it on the Prox
 
 ```bash
 cd /tmp
-wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.5/coolercontrol-truenas-bridge_0.1.5_amd64.deb
-sudo apt install ./coolercontrol-truenas-bridge_0.1.5_amd64.deb
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.6/coolercontrol-truenas-bridge_0.1.6_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.6_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
@@ -103,6 +103,8 @@ Example:
 `api_key` can be set inline, or left empty when `api_key_file` points to a root-readable file containing only the key.
 
 `disk_names` can stay empty to expose all disks returned by TrueNAS. Set it to a list like `["sda", "sdb"]` to limit the API call.
+
+The plugin supports both observed `disk.temperatures` signatures: newer TrueNAS versions using `include_thresholds`, and older versions expecting an `options` object.
 
 `host` can be a bare host such as `truenas.local`, `truenas.local:443`, or a full URL such as `https://truenas.local`. `endpoint` defaults to `/api/current`; older TrueNAS installs may need `/websocket`.
 

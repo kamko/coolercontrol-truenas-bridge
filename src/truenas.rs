@@ -55,12 +55,7 @@ impl TrueNasClient {
         self.login(&mut socket, &mut next_id).await?;
 
         let result = self
-            .api_call(
-                &mut socket,
-                &mut next_id,
-                "disk.temperatures",
-                json!([self.config.disk_names, false]),
-            )
+            .disk_temperatures_call(&mut socket, &mut next_id)
             .await?;
 
         let raw = result
@@ -224,6 +219,30 @@ impl TrueNasClient {
         }
     }
 
+    async fn disk_temperatures_call(
+        &self,
+        socket: &mut Socket,
+        next_id: &mut u64,
+    ) -> Result<Value> {
+        let current_params = json!([self.config.disk_names, false]);
+        match self
+            .api_call(socket, next_id, "disk.temperatures", current_params)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(err) if should_retry_disk_temperature_options(&err) => {
+                self.api_call(
+                    socket,
+                    next_id,
+                    "disk.temperatures",
+                    json!([self.config.disk_names, {}]),
+                )
+                .await
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     async fn legacy_handshake(&self, socket: &mut Socket) -> Result<()> {
         let payload = json!({
             "msg": "connect",
@@ -325,6 +344,11 @@ fn message_to_text(message: Message, method: &str) -> Result<Option<String>> {
         Message::Close(None) => bail!("TrueNAS WebSocket closed while waiting for {method}"),
         _ => Ok(None),
     }
+}
+
+fn should_retry_disk_temperature_options(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}");
+    message.contains("options") && message.contains("A dict was expected")
 }
 
 fn describe_connect_error(url: &str, err: WsError) -> String {
