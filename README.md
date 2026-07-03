@@ -25,12 +25,16 @@ REPORTING_READ
 
 TrueNAS 25.04 and newer use the WebSocket API. This plugin uses `auth.login_with_api_key`.
 
+Use HTTPS/WSS for API-key authentication. TrueNAS can revoke API keys used over insecure HTTP, so keep `tls` enabled even when the TrueNAS certificate is self-signed and set `tls_verify` to `false` for local/self-signed certificates.
+
 ## Install From Package
 
-Download the `.deb` artifact from the latest successful GitHub Actions run or from a tagged release, then install it on the Proxmox/CoolerControl host:
+Download the `.deb` package from the latest release, then install it on the Proxmox/CoolerControl host:
 
 ```bash
-sudo apt install ./coolercontrol-truenas-bridge_*_amd64.deb
+cd /tmp
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.2/coolercontrol-truenas-bridge_0.1.2_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.2_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
@@ -78,7 +82,6 @@ Example:
   "truenas": {
     "host": "truenas.local",
     "endpoint": "/api/current",
-    "username": "",
     "api_key": "",
     "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
     "tls": true,
@@ -94,9 +97,18 @@ Example:
 }
 ```
 
+`api_key` can be set inline, or left empty when `api_key_file` points to a root-readable file containing only the key.
+
 `disk_names` can stay empty to expose all disks returned by TrueNAS. Set it to a list like `["sda", "sdb"]` to limit the API call.
 
 `host` can be a bare host such as `truenas.local`, `truenas.local:443`, or a full URL such as `https://truenas.local`. `endpoint` defaults to `/api/current`; older TrueNAS installs may need `/websocket`.
+
+For a local TrueNAS install with a self-signed certificate, the usual settings are:
+
+```json
+"tls": true,
+"tls_verify": false
+```
 
 Test the configured TrueNAS connection manually:
 
@@ -107,6 +119,21 @@ sudo /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-t
 ```
 
 TrueNAS updates disk temperatures roughly every 5 minutes, so `poll_interval_seconds = 300` is the normal default.
+
+## Logs And Troubleshooting
+
+Plugin logs:
+
+```bash
+sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -n 200 --no-pager
+sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -f
+```
+
+Common issues:
+
+- `HTTP error: 302 Found`: TrueNAS redirected the WebSocket request. Usually this means HTTP was redirected to HTTPS. Set `"tls": true` and `"tls_verify": false`.
+- `TrueNAS WebSocket closed while waiting for auth.login_with_api_key`: the API key is invalid, revoked, expired, or not allowed for the requested method. Regenerate the key after any insecure HTTP test attempt.
+- Only `failsafe` appears in CoolerControl: the plugin is running but cannot fetch disk temperatures. Check plugin logs and run `--check`.
 
 ## Build
 
