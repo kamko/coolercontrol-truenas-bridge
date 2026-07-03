@@ -76,6 +76,11 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config> {
     let mut config: Config =
         serde_json::from_str(&data).with_context(|| format!("parse config: {path}"))?;
 
+    config.truenas.host = config.truenas.host.trim().to_string();
+    config.truenas.endpoint = config.truenas.endpoint.trim().to_string();
+    config.truenas.username = config.truenas.username.trim().to_string();
+    config.truenas.api_key = config.truenas.api_key.trim().to_string();
+
     if config.truenas.api_key.is_empty() && !config.truenas.api_key_file.is_empty() {
         config.truenas.api_key = std::fs::read_to_string(Path::new(&config.truenas.api_key_file))
             .with_context(|| format!("read api_key_file: {}", config.truenas.api_key_file))?
@@ -86,13 +91,24 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config> {
     if config.truenas.host.is_empty() {
         bail!("truenas.host is required");
     }
-    if config.truenas.endpoint.is_empty() || !config.truenas.endpoint.starts_with('/') {
-        bail!("truenas.endpoint must start with /");
+    if config.truenas.endpoint.is_empty() {
+        config.truenas.endpoint = default_endpoint();
+    }
+
+    let endpoint = config.truenas.endpoint.clone();
+    let normalized_endpoint = endpoint.trim_end_matches('/').to_string();
+    if !endpoint.eq_ignore_ascii_case("auto") && !endpoint.starts_with('/') {
+        bail!("truenas.endpoint must be \"auto\" or start with /");
+    }
+    if endpoint.eq_ignore_ascii_case("auto") {
+        config.truenas.endpoint = "auto".to_string();
+    } else if matches!(normalized_endpoint.as_str(), "/api/current" | "/websocket") {
+        config.truenas.endpoint = normalized_endpoint.to_string();
     }
     if config.truenas.api_key.is_empty() {
         bail!("truenas.api_key or truenas.api_key_file is required");
     }
-    if config.truenas.endpoint != "/websocket" && config.truenas.username.is_empty() {
+    if normalized_endpoint == "/api/current" && config.truenas.username.is_empty() {
         bail!("truenas.username is required for /api/current API key authentication");
     }
     if config.polling.poll_interval_seconds == 0 {
@@ -107,7 +123,7 @@ fn default_true() -> bool {
 }
 
 fn default_endpoint() -> String {
-    "/api/current".to_string()
+    "auto".to_string()
 }
 
 fn default_poll_interval_seconds() -> u64 {

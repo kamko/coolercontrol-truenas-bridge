@@ -40,9 +40,9 @@ Architecture: ${architecture}
 Maintainer: kamko
 Installed-Size: ${installed_size}
 Depends: coolercontrold | coolercontrol
-Description: CoolerControl plugin exposing TrueNAS disk temperatures
- Exposes TrueNAS disk temperatures as CoolerControl temperature sources
- for HBA passthrough setups where TrueNAS sees disks and Proxmox controls fans.
+Description: CoolerControl plugin for TrueNAS HDD temperatures
+ Exposes TrueNAS HDD temperatures as CoolerControl temperature sources
+ for HBA passthrough NAS setups where TrueNAS sees disks and Proxmox controls fans.
 CONTROL
 
 cat > "${work_dir}/DEBIAN/postinst" <<'POSTINST'

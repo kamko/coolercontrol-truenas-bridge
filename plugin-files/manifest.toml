@@ -1,8 +1,8 @@
 id = "coolercontrol-truenas-bridge"
 type = "device"
-version = "0.1.7"
+version = "0.1.8"
 url = "https://github.com/kamko/coolercontrol-truenas-bridge"
-description = "Exposes TrueNAS disk temperatures as CoolerControl device temperature sources."
+description = "Exposes TrueNAS HDD temperatures as CoolerControl temperature sources for NAS fan curves."
 address = "/tmp/coolercontrol-truenas-bridge.sock"
 executable = "coolercontrol-truenas-bridge"
 privileged = true

@@ -1,40 +1,48 @@
 # CoolerControl TrueNAS Bridge
 
-CoolerControl device plugin that exposes TrueNAS disk temperatures as CoolerControl temperature sources.
+[![CI](https://github.com/kamko/coolercontrol-truenas-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/kamko/coolercontrol-truenas-bridge/actions/workflows/ci.yml)
 
-This is for the HBA-passthrough NAS setup: TrueNAS sees the disks, Proxmox/CoolerControl controls the fans.
+Expose TrueNAS disk temperatures as CoolerControl temperature sensors.
 
-## What It Does
+This is useful for home NAS and homelab setups where disks are attached to a TrueNAS VM through HBA passthrough, while the host that controls the fans runs Proxmox, Linux, and CoolerControl. TrueNAS can see the HDD temperatures; CoolerControl can control the fans. This plugin bridges the gap so you can build fan curves from TrueNAS disk temperatures.
 
-- Runs as a CoolerControl device plugin.
-- Calls the TrueNAS WebSocket API directly.
-- Discovers disks from `disk.temperatures`.
-- Exposes each disk as a CoolerControl temperature source.
-- Caches temperatures so CoolerControl can poll the plugin frequently without hammering TrueNAS.
-- Uses a configurable fail-safe temperature if TrueNAS becomes unavailable.
+Keywords: CoolerControl plugin, TrueNAS disk temperature, Proxmox fan control, HBA passthrough, NAS HDD cooling, homelab fan curve.
 
-## TrueNAS Permissions
+## Features
 
-Create a TrueNAS API key for a service account that can call `disk.temperatures`.
+- Runs as a native CoolerControl device plugin.
+- Calls the TrueNAS WebSocket API directly; no Prometheus, database, or sidecar service required.
+- Exposes one CoolerControl temperature source per discovered disk.
+- Uses richer labels from TrueNAS when available, such as `sda - HUH721212AL4200 - SN 12345678`.
+- Supports modern `/api/current` JSON-RPC and legacy `/websocket` TrueNAS endpoints.
+- Auto-detects the endpoint by trying `/api/current` first when a username is configured, then falling back to `/websocket`.
+- Caches temperatures to avoid hammering TrueNAS.
+- Uses configurable fail-safe temperatures if TrueNAS becomes unavailable.
+- Ships Linux `amd64` `.deb` packages from GitHub Releases.
 
-Required role:
+## Requirements
 
-```text
-REPORTING_READ
-```
+- CoolerControl installed on the Linux host that controls the fans.
+- Network access from that host to the TrueNAS UI/API address.
+- A TrueNAS API key.
 
-TrueNAS 25.04 and newer use the JSON-RPC 2.0 WebSocket API. The official TrueNAS client uses `ws(s)://host/api/current` for this API and keeps `ws(s)://host/websocket` for the older legacy protocol. This plugin follows that split: for `/api/current`, it uses `auth.login_ex` with `API_KEY_PLAIN`; for `/websocket`, it uses `auth.login_with_api_key`.
+Create the API key for a service account that can call:
 
-Use HTTPS/WSS for API-key authentication. TrueNAS can revoke API keys used over insecure HTTP, so keep `tls` enabled even when the TrueNAS certificate is self-signed and set `tls_verify` to `false` for local/self-signed certificates.
+- `disk.temperatures` for temperatures.
+- `disk.query` for nicer labels. This is optional; if denied, labels fall back to `sda`, `sdb`, etc.
 
-## Install From Package
+For minimal TrueNAS roles, start with `REPORTING_READ` for temperatures and add disk read permissions if richer labels are not shown.
 
-Download the `.deb` package from the latest release, then install it on the Proxmox/CoolerControl host:
+Use HTTPS/WSS for API-key authentication. TrueNAS may revoke API keys used over insecure HTTP, so keep `tls` enabled even when the TrueNAS certificate is self-signed and set `tls_verify` to `false` for local certificates.
+
+## Install
+
+Download and install the latest Debian package on the Proxmox/CoolerControl host:
 
 ```bash
 cd /tmp
-wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.7/coolercontrol-truenas-bridge_0.1.7_amd64.deb
-sudo apt install ./coolercontrol-truenas-bridge_0.1.7_amd64.deb
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.8/coolercontrol-truenas-bridge_0.1.8_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.8_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
@@ -47,25 +55,7 @@ The package installs:
 /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 ```
 
-It creates `config.json` only if it does not already exist.
-
-## Install From Source
-
-```bash
-sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev
-
-git clone https://github.com/kamko/coolercontrol-truenas-bridge.git
-cd coolercontrol-truenas-bridge
-
-sudo ./scripts/install-plugin.sh
-sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
-sudo systemctl restart coolercontrold
-```
-
-CoolerControl should then show a `TrueNAS` device with one temperature source per discovered disk.
-
-The plugin manifest runs the service as privileged so the config/API key can stay root-readable only.
+`config.json` is created only if it does not already exist, so package upgrades preserve your API key and local settings.
 
 ## Configuration
 
@@ -75,13 +65,13 @@ Config path:
 /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 ```
 
-Example:
+Recommended config:
 
 ```json
 {
   "truenas": {
-    "host": "truenas.local",
-    "endpoint": "/api/current",
+    "host": "192.168.100.12",
+    "endpoint": "auto",
     "username": "coolercontrol",
     "api_key": "",
     "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
@@ -98,26 +88,38 @@ Example:
 }
 ```
 
-`username` is the TrueNAS user that owns the API key. It is required for the `/api/current` endpoint.
+`host` can be a bare host/IP such as `192.168.100.12`, `truenas.local`, `truenas.local:443`, or a full URL such as `https://truenas.local`.
 
-`api_key` can be set inline, or left empty when `api_key_file` points to a root-readable file containing only the key.
+`endpoint` should normally stay `auto`, and you can omit it from config entirely because `auto` is the default. In auto mode, the plugin tries:
 
-`disk_names` can stay empty to expose all disks returned by TrueNAS. Set it to a list like `["sda", "sdb"]` to limit the API call.
+1. `/api/current` with `auth.login_ex` and `API_KEY_PLAIN` when `username` is set.
+2. `/websocket` with legacy `auth.login_with_api_key`.
+
+Set `endpoint` manually only when you want to pin behavior:
+
+```json
+"endpoint": "/api/current"
+```
+
+or:
+
+```json
+"endpoint": "/websocket"
+```
+
+`username` is the TrueNAS user that owns the API key. It is required only for `/api/current`; legacy `/websocket` can work without it. Keeping it configured is recommended.
+
+`api_key` can be set inline, but `api_key_file` is cleaner. The file should contain only the API key and be readable by root.
+
+`disk_names` can stay empty to expose every disk returned by TrueNAS. Set it to a list like `["sda", "sdb"]` to limit the API call.
 
 The plugin uses `disk.query` when available to show richer CoolerControl labels such as `sda - HUH721212AL4200 - SN 12345678`. If the API key cannot call `disk.query`, temperatures still work and labels fall back to raw disk names.
 
-The plugin supports both observed `disk.temperatures` signatures: newer TrueNAS versions using `include_thresholds`, and older versions expecting an `options` object.
+TrueNAS updates disk temperatures roughly every 5 minutes, so `poll_interval_seconds = 300` is the normal default.
 
-`host` can be a bare host such as `truenas.local`, `truenas.local:443`, or a full URL such as `https://truenas.local`. `endpoint` defaults to `/api/current`; older TrueNAS installs may need `/websocket`.
+## Test
 
-For a local TrueNAS install with a self-signed certificate, the usual settings are:
-
-```json
-"tls": true,
-"tls_verify": false
-```
-
-Test the configured TrueNAS connection manually:
+Run the plugin check command directly:
 
 ```bash
 sudo /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-truenas-bridge \
@@ -125,9 +127,9 @@ sudo /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/coolercontrol-t
   --check
 ```
 
-TrueNAS updates disk temperatures roughly every 5 minutes, so `poll_interval_seconds = 300` is the normal default.
+Expected output is JSON keyed by disk name. Each disk includes the temperature and display label.
 
-## Logs And Troubleshooting
+## Logs
 
 Plugin logs:
 
@@ -136,11 +138,50 @@ sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -n 200 --no-pager
 sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -f
 ```
 
-Common issues:
+CoolerControl daemon logs:
 
-- `HTTP 302 Found`: TrueNAS redirected the WebSocket request. The log includes `Location`; set `host` and `endpoint` so the plugin connects directly to that final WebSocket URL.
-- `TrueNAS WebSocket closed while waiting for auth.login_ex`: the API key is often invalid or revoked. Regenerate the key after any insecure HTTP test attempt, keep `"tls": true`, and make sure `username` is the user that owns the API key.
-- Only `failsafe` appears in CoolerControl: the plugin is running but cannot fetch disk temperatures. Check plugin logs and run `--check`.
+```bash
+sudo journalctl -u coolercontrold -b -n 200 --no-pager
+```
+
+## Troubleshooting
+
+Only `failsafe` appears in CoolerControl:
+
+The plugin is running, but it cannot fetch TrueNAS temperatures. Run `--check` and inspect the plugin journal.
+
+`HTTP 302 Found` or `Location: .../ui/`:
+
+Your TrueNAS did not accept the attempted WebSocket endpoint. Leave `endpoint` as `auto`, or pin `/websocket` if your TrueNAS only exposes the legacy endpoint.
+
+`TrueNAS WebSocket closed while waiting for auth.login_ex`:
+
+Regenerate the API key, keep `tls: true`, keep `tls_verify: false` for self-signed local certificates, and ensure `username` matches the API key owner.
+
+Disk temperatures work, but labels are still only `sda`, `sdb`, etc.:
+
+The API key probably cannot call `disk.query`. Add disk read permission, or set disk descriptions in TrueNAS and allow `disk.query`.
+
+`0.0 C` for a disk:
+
+That value came from TrueNAS. Some disks, controllers, or sleeping drives may not report SMART temperature consistently.
+
+## How It Works
+
+CoolerControl loads the plugin from:
+
+```text
+/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/
+```
+
+The plugin registers a single CoolerControl device named `TrueNAS`. Every TrueNAS disk temperature becomes a CoolerControl temperature channel. You can then use those temperatures in CoolerControl fan profiles exactly like local motherboard or drive sensors.
+
+TrueNAS API compatibility:
+
+- `/api/current`: JSON-RPC 2.0 WebSocket endpoint used by newer TrueNAS versions.
+- `/websocket`: legacy WebSocket endpoint used by older TrueNAS versions.
+
+The plugin supports both observed `disk.temperatures` signatures: versions using `include_thresholds` and versions expecting an `options` object.
 
 ## Build
 
@@ -149,11 +190,21 @@ cargo test
 cargo build --release
 ```
 
-GitHub Actions builds a Linux `amd64` artifact.
+Install from source:
 
-Build the Debian package locally:
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev
+sudo ./scripts/install-plugin.sh
+sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
+sudo systemctl restart coolercontrold
+```
+
+Build a Debian package locally:
 
 ```bash
 cargo build --release
 bash scripts/package-deb.sh amd64
 ```
+
+GitHub Actions builds and publishes Linux `amd64` release artifacts for tagged versions.

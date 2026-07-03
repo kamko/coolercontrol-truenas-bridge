@@ -1,8 +1,8 @@
 [package]
 name = "coolercontrol-truenas-bridge"
-version = "0.1.7"
+version = "0.1.8"
 authors = ["kamko"]
-description = "CoolerControl device plugin exposing TrueNAS disk temperatures"
+description = "CoolerControl plugin exposing TrueNAS HDD temperatures for Proxmox NAS fan curves"
 license = "MIT"
 repository = "https://github.com/kamko/coolercontrol-truenas-bridge"
 rust-version = "1.88.0"

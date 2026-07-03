@@ -17,6 +17,18 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum Protocol {
+    Current,
+    Legacy,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct EndpointCandidate {
+    endpoint: String,
+    protocol: Protocol,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiskReading {
     pub temperature_c: f64,
@@ -56,13 +68,41 @@ impl TrueNasClient {
     }
 
     pub async fn disk_temperatures(&self) -> Result<BTreeMap<String, DiskReading>> {
-        let mut socket = self.connect().await?;
+        let mut errors = Vec::new();
+
+        for candidate in self.endpoint_candidates() {
+            match self.disk_temperatures_from_endpoint(&candidate).await {
+                Ok(readings) => return Ok(readings),
+                Err(err) => {
+                    debug!(
+                        "TrueNAS endpoint {} failed: {err:#}",
+                        candidate.endpoint_label()
+                    );
+                    errors.push(format!("{}: {err:#}", candidate.endpoint_label()));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            bail!("no TrueNAS endpoint candidates were available");
+        }
+        bail!(
+            "all TrueNAS endpoint candidates failed: {}",
+            errors.join("; ")
+        )
+    }
+
+    async fn disk_temperatures_from_endpoint(
+        &self,
+        candidate: &EndpointCandidate,
+    ) -> Result<BTreeMap<String, DiskReading>> {
+        let mut socket = self.connect(candidate).await?;
         let mut next_id = 1;
 
-        self.login(&mut socket, &mut next_id).await?;
-
+        self.login(&mut socket, &mut next_id, candidate.protocol)
+            .await?;
         let result = self
-            .disk_temperatures_call(&mut socket, &mut next_id)
+            .disk_temperatures_call(&mut socket, &mut next_id, candidate.protocol)
             .await?;
 
         let raw = result
@@ -80,7 +120,10 @@ impl TrueNasClient {
             bail!("TrueNAS returned no usable disk temperatures");
         }
 
-        let labels = match self.disk_labels(&mut socket, &mut next_id).await {
+        let labels = match self
+            .disk_labels(&mut socket, &mut next_id, candidate.protocol)
+            .await
+        {
             Ok(labels) => labels,
             Err(err) => {
                 debug!("failed to fetch TrueNAS disk labels: {err:#}");
@@ -106,8 +149,8 @@ impl TrueNasClient {
             .collect())
     }
 
-    async fn connect(&self) -> Result<Socket> {
-        let url = self.websocket_url();
+    async fn connect(&self, candidate: &EndpointCandidate) -> Result<Socket> {
+        let url = self.websocket_url(candidate);
         let connector = if self.config.tls && !self.config.tls_verify {
             let tls = TlsConnector::builder()
                 .danger_accept_invalid_certs(true)
@@ -131,60 +174,94 @@ impl TrueNasClient {
         }
     }
 
-    fn websocket_url(&self) -> String {
+    fn websocket_url(&self, candidate: &EndpointCandidate) -> String {
         let host = self.config.host.trim_end_matches('/');
         if host.starts_with("ws://") || host.starts_with("wss://") {
             return host.to_string();
         }
 
         if let Some(rest) = host.strip_prefix("https://") {
-            return url_with_default_endpoint("wss", rest, &self.config.endpoint);
+            return url_with_endpoint("wss", rest, &candidate.endpoint);
         }
         if let Some(rest) = host.strip_prefix("http://") {
-            return url_with_default_endpoint("ws", rest, &self.config.endpoint);
+            return url_with_endpoint("ws", rest, &candidate.endpoint);
         }
 
         let scheme = if self.config.tls { "wss" } else { "ws" };
-        url_with_default_endpoint(scheme, host, &self.config.endpoint)
+        url_with_endpoint(scheme, host, &candidate.endpoint)
     }
 
-    async fn login(&self, socket: &mut Socket, next_id: &mut u64) -> Result<()> {
-        if self.config.endpoint == "/websocket" {
-            self.legacy_handshake(socket).await?;
-            let result = self
-                .legacy_call(
-                    socket,
-                    next_id,
-                    "auth.login_with_api_key",
-                    json!([self.config.api_key]),
-                )
-                .await?;
-            if result.as_bool() != Some(true) {
-                bail!("TrueNAS legacy API key authentication failed");
-            }
-            return Ok(());
+    fn endpoint_candidates(&self) -> Vec<EndpointCandidate> {
+        let endpoint = self.config.endpoint.trim();
+        let host = self.config.host.trim_end_matches('/');
+
+        if host.starts_with("ws://") || host.starts_with("wss://") {
+            return vec![EndpointCandidate {
+                endpoint: String::new(),
+                protocol: protocol_for_endpoint(host),
+            }];
         }
 
-        let result = self
-            .call(
-                socket,
-                next_id,
-                "auth.login_ex",
-                json!([{
-                    "mechanism": "API_KEY_PLAIN",
-                    "username": self.config.username,
-                    "api_key": self.config.api_key
-                }]),
-            )
-            .await?;
+        if endpoint.eq_ignore_ascii_case("auto") {
+            let mut candidates = Vec::new();
+            if !self.config.username.is_empty() {
+                candidates.push(EndpointCandidate::current());
+            }
+            candidates.push(EndpointCandidate::legacy());
+            return candidates;
+        }
 
-        match result.get("response_type").and_then(Value::as_str) {
-            Some("SUCCESS") => Ok(()),
-            Some("AUTH_ERR") => bail!("TrueNAS API key authentication failed"),
-            Some("EXPIRED") => bail!("TrueNAS API key has expired"),
-            Some("DENIED") => bail!("TrueNAS account does not have API access"),
-            Some("REDIRECT") => bail!("TrueNAS authentication returned redirect: {result}"),
-            _ => bail!("TrueNAS auth.login_ex returned unexpected response: {result}"),
+        vec![EndpointCandidate {
+            endpoint: endpoint.to_string(),
+            protocol: protocol_for_endpoint(endpoint),
+        }]
+    }
+
+    async fn login(
+        &self,
+        socket: &mut Socket,
+        next_id: &mut u64,
+        protocol: Protocol,
+    ) -> Result<()> {
+        match protocol {
+            Protocol::Current => {
+                let result = self
+                    .call(
+                        socket,
+                        next_id,
+                        "auth.login_ex",
+                        json!([{
+                            "mechanism": "API_KEY_PLAIN",
+                            "username": self.config.username,
+                            "api_key": self.config.api_key
+                        }]),
+                    )
+                    .await?;
+
+                match result.get("response_type").and_then(Value::as_str) {
+                    Some("SUCCESS") => Ok(()),
+                    Some("AUTH_ERR") => bail!("TrueNAS API key authentication failed"),
+                    Some("EXPIRED") => bail!("TrueNAS API key has expired"),
+                    Some("DENIED") => bail!("TrueNAS account does not have API access"),
+                    Some("REDIRECT") => bail!("TrueNAS authentication returned redirect: {result}"),
+                    _ => bail!("TrueNAS auth.login_ex returned unexpected response: {result}"),
+                }
+            }
+            Protocol::Legacy => {
+                self.legacy_handshake(socket).await?;
+                let result = self
+                    .legacy_call(
+                        socket,
+                        next_id,
+                        "auth.login_with_api_key",
+                        json!([self.config.api_key]),
+                    )
+                    .await?;
+                if result.as_bool() != Some(true) {
+                    bail!("TrueNAS legacy API key authentication failed");
+                }
+                Ok(())
+            }
         }
     }
 
@@ -241,11 +318,11 @@ impl TrueNasClient {
         next_id: &mut u64,
         method: &str,
         params: Value,
+        protocol: Protocol,
     ) -> Result<Value> {
-        if self.config.endpoint == "/websocket" {
-            self.legacy_call(socket, next_id, method, params).await
-        } else {
-            self.call(socket, next_id, method, params).await
+        match protocol {
+            Protocol::Current => self.call(socket, next_id, method, params).await,
+            Protocol::Legacy => self.legacy_call(socket, next_id, method, params).await,
         }
     }
 
@@ -253,10 +330,17 @@ impl TrueNasClient {
         &self,
         socket: &mut Socket,
         next_id: &mut u64,
+        protocol: Protocol,
     ) -> Result<Value> {
         let current_params = json!([self.config.disk_names, false]);
         match self
-            .api_call(socket, next_id, "disk.temperatures", current_params)
+            .api_call(
+                socket,
+                next_id,
+                "disk.temperatures",
+                current_params,
+                protocol,
+            )
             .await
         {
             Ok(result) => Ok(result),
@@ -266,6 +350,7 @@ impl TrueNasClient {
                     next_id,
                     "disk.temperatures",
                     json!([self.config.disk_names, {}]),
+                    protocol,
                 )
                 .await
             }
@@ -277,9 +362,10 @@ impl TrueNasClient {
         &self,
         socket: &mut Socket,
         next_id: &mut u64,
+        protocol: Protocol,
     ) -> Result<BTreeMap<String, String>> {
         let rows = self
-            .api_call(socket, next_id, "disk.query", json!([[], {}]))
+            .api_call(socket, next_id, "disk.query", json!([[], {}]), protocol)
             .await?;
         let rows = rows
             .as_array()
@@ -454,7 +540,39 @@ fn compact_serial(serial: &str) -> String {
     }
 }
 
-fn url_with_default_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -> String {
+impl EndpointCandidate {
+    fn current() -> Self {
+        Self {
+            endpoint: "/api/current".to_string(),
+            protocol: Protocol::Current,
+        }
+    }
+
+    fn legacy() -> Self {
+        Self {
+            endpoint: "/websocket".to_string(),
+            protocol: Protocol::Legacy,
+        }
+    }
+
+    fn endpoint_label(&self) -> &str {
+        if self.endpoint.is_empty() {
+            "<host URL>"
+        } else {
+            &self.endpoint
+        }
+    }
+}
+
+fn protocol_for_endpoint(endpoint: &str) -> Protocol {
+    if endpoint.trim_end_matches('/').ends_with("/websocket") {
+        Protocol::Legacy
+    } else {
+        Protocol::Current
+    }
+}
+
+fn url_with_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -> String {
     if host_or_path.contains('/') {
         format!("{scheme}://{host_or_path}")
     } else {
@@ -464,7 +582,7 @@ fn url_with_default_endpoint(scheme: &str, host_or_path: &str, endpoint: &str) -
 
 #[cfg(test)]
 mod tests {
-    use super::{TrueNasClient, compact_serial, disk_label};
+    use super::{EndpointCandidate, Protocol, TrueNasClient, compact_serial, disk_label};
     use crate::config::TrueNasConfig;
     use serde_json::json;
     use std::time::Duration;
@@ -485,13 +603,19 @@ mod tests {
     #[test]
     fn builds_websocket_url_from_bare_host() {
         let client = TrueNasClient::new(config("truenas.local"), Duration::from_secs(1));
-        assert_eq!(client.websocket_url(), "wss://truenas.local/api/current");
+        assert_eq!(
+            client.websocket_url(&EndpointCandidate::current()),
+            "wss://truenas.local/api/current"
+        );
     }
 
     #[test]
     fn accepts_https_host() {
         let client = TrueNasClient::new(config("https://truenas.local"), Duration::from_secs(1));
-        assert_eq!(client.websocket_url(), "wss://truenas.local/api/current");
+        assert_eq!(
+            client.websocket_url(&EndpointCandidate::current()),
+            "wss://truenas.local/api/current"
+        );
     }
 
     #[test]
@@ -500,7 +624,66 @@ mod tests {
             config("wss://truenas.local/websocket"),
             Duration::from_secs(1),
         );
-        assert_eq!(client.websocket_url(), "wss://truenas.local/websocket");
+        assert_eq!(
+            client.websocket_url(&EndpointCandidate::legacy()),
+            "wss://truenas.local/websocket"
+        );
+    }
+
+    #[test]
+    fn auto_endpoint_tries_current_then_legacy_with_username() {
+        let mut config = config("truenas.local");
+        config.endpoint = "auto".to_string();
+        let client = TrueNasClient::new(config, Duration::from_secs(1));
+
+        assert_eq!(
+            client.endpoint_candidates(),
+            vec![EndpointCandidate::current(), EndpointCandidate::legacy()]
+        );
+    }
+
+    #[test]
+    fn auto_endpoint_skips_current_without_username() {
+        let mut config = config("truenas.local");
+        config.endpoint = "auto".to_string();
+        config.username = String::new();
+        let client = TrueNasClient::new(config, Duration::from_secs(1));
+
+        assert_eq!(
+            client.endpoint_candidates(),
+            vec![EndpointCandidate::legacy()]
+        );
+    }
+
+    #[test]
+    fn websocket_url_host_forces_legacy_protocol() {
+        let client = TrueNasClient::new(
+            config("wss://truenas.local/websocket"),
+            Duration::from_secs(1),
+        );
+
+        assert_eq!(
+            client.endpoint_candidates(),
+            vec![EndpointCandidate {
+                endpoint: String::new(),
+                protocol: Protocol::Legacy,
+            }]
+        );
+    }
+
+    #[test]
+    fn trailing_slash_websocket_endpoint_is_legacy() {
+        let mut config = config("truenas.local");
+        config.endpoint = "/websocket/".to_string();
+        let client = TrueNasClient::new(config, Duration::from_secs(1));
+
+        assert_eq!(
+            client.endpoint_candidates(),
+            vec![EndpointCandidate {
+                endpoint: "/websocket/".to_string(),
+                protocol: Protocol::Legacy,
+            }]
+        );
     }
 
     #[test]
