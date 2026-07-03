@@ -33,8 +33,8 @@ Download the `.deb` package from the latest release, then install it on the Prox
 
 ```bash
 cd /tmp
-wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.4/coolercontrol-truenas-bridge_0.1.4_amd64.deb
-sudo apt install ./coolercontrol-truenas-bridge_0.1.4_amd64.deb
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.5/coolercontrol-truenas-bridge_0.1.5_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.5_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
@@ -134,7 +134,7 @@ sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -f
 
 Common issues:
 
-- `HTTP error: 302 Found`: TrueNAS redirected the WebSocket request. Usually this means HTTP was redirected to HTTPS. Set `"tls": true` and `"tls_verify": false`.
+- `HTTP 302 Found`: TrueNAS redirected the WebSocket request. The log includes `Location`; set `host` and `endpoint` so the plugin connects directly to that final WebSocket URL.
 - `TrueNAS WebSocket closed while waiting for auth.login_ex`: the API key is often invalid or revoked. Regenerate the key after any insecure HTTP test attempt, keep `"tls": true`, and make sure `username` is the user that owns the API key.
 - Only `failsafe` appears in CoolerControl: the plugin is running but cannot fetch disk temperatures. Check plugin logs and run `--check`.
 

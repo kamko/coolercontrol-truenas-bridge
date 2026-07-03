@@ -12,7 +12,7 @@ use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -93,15 +93,17 @@ impl TrueNasClient {
             None
         };
 
-        let (socket, _) = timeout(
+        let connect_result = timeout(
             self.timeout,
             connect_async_tls_with_config(url.as_str(), None, false, connector),
         )
         .await
-        .context("connect TrueNAS WebSocket timed out")?
-        .with_context(|| format!("connect TrueNAS WebSocket: {url}"))?;
+        .context("connect TrueNAS WebSocket timed out")?;
 
-        Ok(socket)
+        match connect_result {
+            Ok((socket, _)) => Ok(socket),
+            Err(err) => bail!("{}", describe_connect_error(&url, err)),
+        }
     }
 
     fn websocket_url(&self) -> String {
@@ -322,6 +324,23 @@ fn message_to_text(message: Message, method: &str) -> Result<Option<String>> {
         ),
         Message::Close(None) => bail!("TrueNAS WebSocket closed while waiting for {method}"),
         _ => Ok(None),
+    }
+}
+
+fn describe_connect_error(url: &str, err: WsError) -> String {
+    match err {
+        WsError::Http(response) => {
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("<missing>");
+            format!(
+                "connect TrueNAS WebSocket: {url}: HTTP {}; Location: {location}",
+                response.status()
+            )
+        }
+        other => format!("connect TrueNAS WebSocket: {url}: {other}"),
     }
 }
 
