@@ -23,7 +23,7 @@ Required role:
 REPORTING_READ
 ```
 
-TrueNAS 25.04 and newer use the WebSocket API. This plugin uses `auth.login_with_api_key`.
+TrueNAS 25.04 and newer use the JSON-RPC 2.0 WebSocket API. The official TrueNAS client uses `ws(s)://host/api/current` for this API and keeps `ws(s)://host/websocket` for the older legacy protocol. This plugin follows that split: for `/api/current`, it uses `auth.login_ex` with `API_KEY_PLAIN`; for `/websocket`, it uses `auth.login_with_api_key`.
 
 Use HTTPS/WSS for API-key authentication. TrueNAS can revoke API keys used over insecure HTTP, so keep `tls` enabled even when the TrueNAS certificate is self-signed and set `tls_verify` to `false` for local/self-signed certificates.
 
@@ -33,8 +33,8 @@ Download the `.deb` package from the latest release, then install it on the Prox
 
 ```bash
 cd /tmp
-wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.2/coolercontrol-truenas-bridge_0.1.2_amd64.deb
-sudo apt install ./coolercontrol-truenas-bridge_0.1.2_amd64.deb
+wget https://github.com/kamko/coolercontrol-truenas-bridge/releases/download/v0.1.3/coolercontrol-truenas-bridge_0.1.3_amd64.deb
+sudo apt install ./coolercontrol-truenas-bridge_0.1.3_amd64.deb
 sudoedit /var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/config.json
 sudo systemctl restart coolercontrold
 ```
@@ -82,6 +82,7 @@ Example:
   "truenas": {
     "host": "truenas.local",
     "endpoint": "/api/current",
+    "username": "coolercontrol",
     "api_key": "",
     "api_key_file": "/var/lib/coolercontrol/plugins/coolercontrol-truenas-bridge/api.key",
     "tls": true,
@@ -96,6 +97,8 @@ Example:
   }
 }
 ```
+
+`username` is the TrueNAS user that owns the API key. It is required for the `/api/current` endpoint.
 
 `api_key` can be set inline, or left empty when `api_key_file` points to a root-readable file containing only the key.
 
@@ -132,7 +135,7 @@ sudo journalctl -u cc-plugin-coolercontrol-truenas-bridge -b -f
 Common issues:
 
 - `HTTP error: 302 Found`: TrueNAS redirected the WebSocket request. Usually this means HTTP was redirected to HTTPS. Set `"tls": true` and `"tls_verify": false`.
-- `TrueNAS WebSocket closed while waiting for auth.login_with_api_key`: the API key is invalid, revoked, expired, or not allowed for the requested method. Regenerate the key after any insecure HTTP test attempt.
+- `TrueNAS WebSocket closed while waiting for auth.login_ex`: the API key is often invalid or revoked. Regenerate the key after any insecure HTTP test attempt, keep `"tls": true`, and make sure `username` is the user that owns the API key.
 - Only `failsafe` appears in CoolerControl: the plugin is running but cannot fetch disk temperatures. Check plugin logs and run `--check`.
 
 ## Build

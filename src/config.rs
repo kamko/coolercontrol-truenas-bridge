@@ -92,6 +92,9 @@ pub fn load_config(config_path: Option<&str>) -> Result<Config> {
     if config.truenas.api_key.is_empty() {
         bail!("truenas.api_key or truenas.api_key_file is required");
     }
+    if config.truenas.endpoint != "/websocket" && config.truenas.username.is_empty() {
+        bail!("truenas.username is required for /api/current API key authentication");
+    }
     if config.polling.poll_interval_seconds == 0 {
         bail!("polling.poll_interval_seconds must be at least 1");
     }

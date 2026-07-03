@@ -122,18 +122,42 @@ impl TrueNasClient {
     }
 
     async fn login(&self, socket: &mut Socket, next_id: &mut u64) -> Result<()> {
+        if self.config.endpoint == "/websocket" {
+            let result = self
+                .call(
+                    socket,
+                    next_id,
+                    "auth.login_with_api_key",
+                    json!([self.config.api_key]),
+                )
+                .await?;
+            if result.as_bool() != Some(true) {
+                bail!("TrueNAS legacy API key authentication failed");
+            }
+            return Ok(());
+        }
+
         let result = self
             .call(
                 socket,
                 next_id,
-                "auth.login_with_api_key",
-                json!([self.config.api_key]),
+                "auth.login_ex",
+                json!([{
+                    "mechanism": "API_KEY_PLAIN",
+                    "username": self.config.username,
+                    "api_key": self.config.api_key
+                }]),
             )
             .await?;
-        if result.as_bool() != Some(true) {
-            bail!("TrueNAS legacy API key authentication failed");
+
+        match result.get("response_type").and_then(Value::as_str) {
+            Some("SUCCESS") => Ok(()),
+            Some("AUTH_ERR") => bail!("TrueNAS API key authentication failed"),
+            Some("EXPIRED") => bail!("TrueNAS API key has expired"),
+            Some("DENIED") => bail!("TrueNAS account does not have API access"),
+            Some("REDIRECT") => bail!("TrueNAS authentication returned redirect: {result}"),
+            _ => bail!("TrueNAS auth.login_ex returned unexpected response: {result}"),
         }
-        Ok(())
     }
 
     async fn call(
@@ -170,6 +194,14 @@ impl TrueNasClient {
                 Message::Binary(bytes) => String::from_utf8(bytes.to_vec())
                     .with_context(|| format!("decode binary {method} response"))?
                     .into(),
+                Message::Close(Some(frame)) => bail!(
+                    "TrueNAS WebSocket closed while waiting for {method}: {} {}",
+                    frame.code,
+                    frame.reason
+                ),
+                Message::Close(None) => {
+                    bail!("TrueNAS WebSocket closed while waiting for {method}")
+                }
                 _ => continue,
             };
             let response: RpcResponse =
